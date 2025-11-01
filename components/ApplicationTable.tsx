@@ -1,6 +1,8 @@
+
 import React from 'react';
 import { Application, ApplicationStatus } from '../types';
 import { SearchIcon, PrintIcon, ExternalLinkIcon, EditIcon, DeleteIcon, DownloadIcon, ChevronsUpDownIcon } from './Icons';
+import ApplicationCard from './ApplicationCard';
 
 interface ApplicationTableProps {
     applications: Application[];
@@ -9,15 +11,16 @@ interface ApplicationTableProps {
     setSearchTerm: (term: string) => void;
     onPrint: () => void;
     onEdit: (app: Application) => void;
-    onDelete: (id: number) => void;
+    onDelete: (id: string) => void;
     onSort: (key: keyof Application) => void;
     sortConfig: { key: keyof Application; direction: 'ascending' | 'descending' } | null;
     onStatusFilterChange: (status: string) => void;
     onCsvExport: () => void;
+    isReadOnly?: boolean;
 }
 
 const ApplicationTable: React.FC<ApplicationTableProps> = ({ 
-    applications, totalApplications, searchTerm, setSearchTerm, onPrint, onEdit, onDelete, onSort, sortConfig, onStatusFilterChange, onCsvExport
+    applications, totalApplications, searchTerm, setSearchTerm, onPrint, onEdit, onDelete, onSort, sortConfig, onStatusFilterChange, onCsvExport, isReadOnly = false
 }) => {
     
     const getStatusBadge = (status: string) => {
@@ -103,7 +106,22 @@ const ApplicationTable: React.FC<ApplicationTableProps> = ({
                     <PrintIcon />প্রিন্ট করুন
                 </button>
             </div>
-            <div className="rounded-md border overflow-x-auto print-full-width">
+
+            {/* Mobile Card View */}
+            <div className="md:hidden print:hidden">
+                 {applications.map(app => (
+                    <ApplicationCard 
+                        key={app.id}
+                        app={app}
+                        onEdit={onEdit}
+                        onDelete={onDelete}
+                        isReadOnly={isReadOnly}
+                    />
+                ))}
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="rounded-md border overflow-x-auto print-full-width hidden md:block print:block">
                 <table className="w-full caption-bottom text-sm">
                     <thead className="[&_tr]:border-b bg-gray-50">
                         <tr className="border-b transition-colors">
@@ -116,7 +134,7 @@ const ApplicationTable: React.FC<ApplicationTableProps> = ({
                             <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap">বর্তমান অবস্থা</th>
                             <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap">ফাইল</th>
                             <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap">দাখিলকারী</th>
-                            <th className="h-10 px-2 align-middle font-medium whitespace-nowrap text-right no-print">অ্যাকশন</th>
+                            {!isReadOnly && <th className="h-10 px-2 align-middle font-medium whitespace-nowrap text-right no-print">অ্যাকশন</th>}
                         </tr>
                     </thead>
                     <tbody>
@@ -132,8 +150,8 @@ const ApplicationTable: React.FC<ApplicationTableProps> = ({
                                 </td>
                                 <td className="p-2 align-middle whitespace-nowrap">
                                     <div className="space-y-1">
-                                        <div className="text-sm">{app.mobile_number}</div>
-                                        <div className="text-xs text-slate-600">{app.user_id}</div>
+                                        <div className="text-sm">{`0${app.mobile_number}`}</div>
+                                        <div className="text-xs text-slate-600 truncate max-w-[100px]">{app.manual_user_id}</div>
                                     </div>
                                 </td>
                                 <td className="p-2 align-middle whitespace-nowrap">
@@ -155,24 +173,31 @@ const ApplicationTable: React.FC<ApplicationTableProps> = ({
                                     </div>
                                 </td>
                                 <td className="p-2 align-middle whitespace-nowrap">{app.submitter}</td>
-                                <td className="p-2 align-middle whitespace-nowrap text-right no-print">
-                                    <div className="flex justify-end gap-1">
-                                        <a href={app.status_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium border shadow-xs h-8 rounded-md gap-1.5 px-3 hover:bg-gray-100">
-                                            <ExternalLinkIcon/> অবস্থা দেখুন
-                                        </a>
-                                        <button onClick={() => onEdit(app)} className="inline-flex items-center justify-center rounded-md text-sm font-medium h-8 w-8 hover:bg-gray-100" title="সম্পাদনা">
-                                            <EditIcon/>
-                                        </button>
-                                        <button onClick={() => onDelete(app.id)} className="inline-flex items-center justify-center rounded-md text-sm font-medium h-8 w-8 hover:bg-gray-100" title="মুছে ফেলুন">
-                                            <DeleteIcon/>
-                                        </button>
-                                    </div>
-                                </td>
+                                {!isReadOnly && (
+                                    <td className="p-2 align-middle whitespace-nowrap text-right no-print">
+                                        <div className="flex justify-end gap-1">
+                                            <a href={app.status_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium border shadow-xs h-8 rounded-md gap-1.5 px-3 hover:bg-gray-100">
+                                                <ExternalLinkIcon/> অবস্থা দেখুন
+                                            </a>
+                                            <button onClick={() => onEdit(app)} className="inline-flex items-center justify-center rounded-md text-sm font-medium h-8 w-8 hover:bg-gray-100" title="সম্পাদনা">
+                                                <EditIcon/>
+                                            </button>
+                                            <button onClick={() => onDelete(app.id)} className="inline-flex items-center justify-center rounded-md text-sm font-medium h-8 w-8 hover:bg-gray-100" title="মুছে ফেলুন">
+                                                <DeleteIcon/>
+                                            </button>
+                                        </div>
+                                    </td>
+                                )}
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
+             {applications.length === 0 && (
+                <div className="text-center py-10 text-slate-500">
+                    <p>কোনো আবেদন পাওয়া যায়নি।</p>
+                </div>
+            )}
         </div>
     );
 }

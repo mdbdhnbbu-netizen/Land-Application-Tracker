@@ -1,11 +1,12 @@
 
 export interface Application {
-  id: number;
+  id: string;
   application_date: string;
   mouza_name: string;
   applicant_name: string;
-  user_id: string;
+  user_id: string; // This will now be the Firebase Auth UID of the submitter
   mobile_number: string;
+  manual_user_id: string;
   application_number: string;
   case_number: string;
   application_status: string;
@@ -14,6 +15,13 @@ export interface Application {
   submitter: string;
   status_link: string;
   hearing_date: string | null;
+}
+
+export interface User {
+  id: string; // Firebase Auth UID
+  name: string;
+  email: string;
+  role: 'Admin' | 'User';
 }
 
 export enum ApplicationStatus {
