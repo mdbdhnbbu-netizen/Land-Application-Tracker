@@ -26,6 +26,7 @@ const App: React.FC = () => {
     const [users, setUsers] = useState<User[]>([]);
     const [applications, setApplications] = useState<Application[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     
     const [selectedUserId, setSelectedUserId] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState('');
@@ -45,24 +46,30 @@ const App: React.FC = () => {
     // Auth state listener
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                setFirebaseUser(user);
-                const userDocRef = doc(db, 'users', user.uid);
-                const userDocSnap = await getDoc(userDocRef);
-                if (userDocSnap.exists()) {
-                    setCurrentUser({ id: user.uid, ...userDocSnap.data() } as User);
+            try {
+                if (user) {
+                    setFirebaseUser(user);
+                    const userDocRef = doc(db, 'users', user.uid);
+                    const userDocSnap = await getDoc(userDocRef);
+                    if (userDocSnap.exists()) {
+                        setCurrentUser({ id: user.uid, ...userDocSnap.data() } as User);
+                    } else {
+                        console.error("User profile not found in Firestore.");
+                        setCurrentUser(null);
+                        await signOut(auth); // Log out user if profile is missing
+                    }
                 } else {
-                    // Handle case where user exists in Auth but not in Firestore
-                    console.error("User profile not found in Firestore.");
+                    setFirebaseUser(null);
                     setCurrentUser(null);
+                    setUsers([]);
+                    setApplications([]);
                 }
-            } else {
-                setFirebaseUser(null);
-                setCurrentUser(null);
-                setUsers([]);
-                setApplications([]);
+            } catch(e) {
+                console.error("Authentication error:", e);
+                setError("ব্যবহারকারীর তথ্য যাচাই করা যায়নি।");
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         });
         return () => unsubscribe();
     }, []);
@@ -71,34 +78,36 @@ const App: React.FC = () => {
     const fetchData = useCallback(async () => {
         if (!currentUser) return;
     
-        if (currentUser.role === 'Admin') {
-            // Fetch all users for sidebar
-            const usersQuery = query(collection(db, 'users'));
-            const usersSnapshot = await getDocs(usersQuery);
-            const allUsers = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
-            setUsers(allUsers);
-            
-            // Set initial selected user if not set
-            const currentSelectedId = selectedUserId || allUsers[0]?.id || '';
-            if (currentSelectedId !== selectedUserId) {
-              setSelectedUserId(currentSelectedId);
-            }
-    
-            // Fetch applications for the selected user
-            if (currentSelectedId) {
-                const appsQuery = query(collection(db, 'applications'), where('user_id', '==', currentSelectedId));
+        try {
+            if (currentUser.role === 'Admin') {
+                const usersQuery = query(collection(db, 'users'));
+                const usersSnapshot = await getDocs(usersQuery);
+                const allUsers = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+                setUsers(allUsers);
+                
+                const currentSelectedId = selectedUserId || allUsers[0]?.id || '';
+                if (currentSelectedId !== selectedUserId) {
+                  setSelectedUserId(currentSelectedId);
+                }
+        
+                if (currentSelectedId) {
+                    const appsQuery = query(collection(db, 'applications'), where('user_id', '==', currentSelectedId));
+                    const appsSnapshot = await getDocs(appsQuery);
+                    const userApps = appsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Application));
+                    setApplications(userApps);
+                } else {
+                    setApplications([]);
+                }
+            } else { // Regular User
+                setSelectedUserId(currentUser.id);
+                const appsQuery = query(collection(db, 'applications'), where('user_id', '==', currentUser.id));
                 const appsSnapshot = await getDocs(appsQuery);
                 const userApps = appsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Application));
                 setApplications(userApps);
-            } else {
-                setApplications([]);
             }
-        } else { // Regular User
-            setSelectedUserId(currentUser.id);
-            const appsQuery = query(collection(db, 'applications'), where('user_id', '==', currentUser.id));
-            const appsSnapshot = await getDocs(appsQuery);
-            const userApps = appsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Application));
-            setApplications(userApps);
+        } catch (e) {
+            console.error("Failed to fetch data:", e);
+            setError("ডেটা লোড করা যায়নি। Firestore security rules বা নেটওয়ার্ক সংযোগ পরীক্ষা করুন।");
         }
     }, [currentUser, selectedUserId]);
 
@@ -162,22 +171,24 @@ const App: React.FC = () => {
     };
 
     const handleAppSubmit = async (appData: Omit<Application, 'id' | 'user_id'> | Application) => {
-        const userToCredit = users.find(u => u.id === selectedUserId) || currentUser;
-        if (!userToCredit) return;
-    
-        const dataToSave = {
-            ...appData,
-            user_id: userToCredit.id,
-        };
-    
-        if ('id' in appData && appData.id) { // Editing existing application
-            const appDocRef = doc(db, 'applications', appData.id);
-            await updateDoc(appDocRef, dataToSave);
-        } else { // Adding new application
-            const { id, ...restOfData } = dataToSave as Application; // remove id if it exists
-            await addDoc(collection(db, 'applications'), restOfData);
+        try {
+            const userToCredit = users.find(u => u.id === selectedUserId) || currentUser;
+            if (!userToCredit) throw new Error("No user selected to credit the application to.");
+        
+            const dataToSave = { ...appData, user_id: userToCredit.id };
+        
+            if ('id' in appData && appData.id) {
+                const appDocRef = doc(db, 'applications', appData.id);
+                await updateDoc(appDocRef, dataToSave);
+            } else {
+                const { id, ...restOfData } = dataToSave as Application;
+                await addDoc(collection(db, 'applications'), restOfData);
+            }
+            fetchData();
+        } catch(e) {
+            console.error("Error submitting application:", e);
+            alert("আবেদনটি জমা দেওয়া যায়নি।");
         }
-        fetchData();
     };
     
     const handleEditApp = (app: Application) => {
@@ -187,8 +198,13 @@ const App: React.FC = () => {
 
     const handleDeleteApp = async (id: string) => {
         if(window.confirm('আপনি কি নিশ্চিত যে এই আবেদনটি মুছে ফেলতে চান?')){
-            await deleteDoc(doc(db, 'applications', id));
-            fetchData();
+            try {
+                await deleteDoc(doc(db, 'applications', id));
+                fetchData();
+            } catch(e) {
+                console.error("Error deleting application:", e);
+                alert("আবেদনটি মোছা যায়নি।");
+            }
         }
     };
     
@@ -207,7 +223,6 @@ const App: React.FC = () => {
     };
 
     const handleAddUser = async (email: string, name: string, role: 'Admin' | 'User', password: string) => {
-        // This function now throws an error on failure, which is caught in the dialog
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const newUser: Omit<User, 'id'> = { email, name, role };
         await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
@@ -220,17 +235,19 @@ const App: React.FC = () => {
     }
     
     const handleUpdateUser = async (updatedUser: User) => {
-        const userDocRef = doc(db, 'users', updatedUser.id);
-        await updateDoc(userDocRef, {
-            name: updatedUser.name,
-            role: updatedUser.role,
-        });
-        fetchData();
-        if (currentUser?.id === updatedUser.id) {
-            setCurrentUser(updatedUser);
+        try {
+            const userDocRef = doc(db, 'users', updatedUser.id);
+            await updateDoc(userDocRef, { name: updatedUser.name, role: updatedUser.role });
+            fetchData();
+            if (currentUser?.id === updatedUser.id) {
+                setCurrentUser(updatedUser);
+            }
+            setIsUserEditDialogOpen(false);
+            setEditingUser(null);
+        } catch(e) {
+            console.error("Error updating user:", e);
+            alert("ব্যবহারকারীর তথ্য আপডেট করা যায়নি।");
         }
-        setIsUserEditDialogOpen(false);
-        setEditingUser(null);
     }
 
     const handleDeleteUser = async (userId: string) => {
@@ -239,40 +256,60 @@ const App: React.FC = () => {
             return;
         }
         if(window.confirm('আপনি কি নিশ্চিত যে এই ব্যবহারকারীকে মুছে ফেলতে চান? তাদের সমস্ত আবেদন ডেটা মুছে যাবে। এই কাজটি ফেরানো যাবে না।')){
-            // Note: This does not delete the user from Firebase Auth, only their data.
-            // Deleting from Auth requires a backend function for security reasons.
-            
-            // Batch delete applications
-            const appsQuery = query(collection(db, 'applications'), where('user_id', '==', userId));
-            const appsSnapshot = await getDocs(appsQuery);
-            const batch = writeBatch(db);
-            appsSnapshot.forEach(doc => {
-                batch.delete(doc.ref);
-            });
-            await batch.commit();
+            try {
+                const appsQuery = query(collection(db, 'applications'), where('user_id', '==', userId));
+                const appsSnapshot = await getDocs(appsQuery);
+                const batch = writeBatch(db);
+                appsSnapshot.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
 
-            // Delete user profile from Firestore
-            await deleteDoc(doc(db, 'users', userId));
+                await deleteDoc(doc(db, 'users', userId));
 
-            alert('ব্যবহারকারীর ডেটা মুছে ফেলা হয়েছে। নিরাপত্তা জনিত কারণে, মূল লগইন অ্যাকাউন্টটি Firebase কনসোল থেকে মুছে ফেলতে হবে।');
-            
-            if (selectedUserId === userId) {
-                setSelectedUserId(users.find(u => u.id !== userId)?.id || '');
+                alert('ব্যবহারকারীর ডেটা মুছে ফেলা হয়েছে। নিরাপত্তা জনিত কারণে, মূল লগইন অ্যাকাউন্টটি Firebase কনসোল থেকে মুছে ফেলতে হবে।');
+                
+                if (selectedUserId === userId) {
+                    setSelectedUserId(users.find(u => u.id !== userId)?.id || '');
+                }
+                fetchData();
+            } catch(e) {
+                console.error("Error deleting user and their data:", e);
+                alert("ব্যবহারকারীকে মোছা যায়নি।");
             }
-            fetchData();
         }
     }
 
     const handleLogin = async (email: string, password: string) => {
+        // The try-catch is in LoginScreen, but this main function must also throw on failure
         await signInWithEmailAndPassword(auth, email, password);
     };
+
     const handleLogout = async () => {
-        await signOut(auth);
+        try {
+            await signOut(auth);
+        } catch(e) {
+            console.error("Error signing out:", e);
+            alert("লগ আউট করা যায়নি।");
+        }
     };
 
 
     if (loading) {
         return <LoadingSpinner />;
+    }
+
+    if (error) {
+        return (
+            <div className="flex items-center justify-center h-screen bg-red-50">
+                <div className="text-center p-8 bg-white shadow-lg rounded-lg border border-red-200">
+                    <h2 className="text-2xl font-bold text-red-700 mb-4">একটি সমস্যা হয়েছে</h2>
+                    <p className="text-slate-600">{error}</p>
+                    <p className="mt-4 text-sm text-slate-500">
+                        অনুগ্রহ করে পৃষ্ঠাটি রিফ্রেশ করার চেষ্টা করুন অথবা অ্যাডমিনিস্ট্রেটরের সাথে যোগাযোগ করুন।
+                        (বিস্তারিত জানতে ব্রাউজার কনসোল দেখুন)
+                    </p>
+                </div>
+            </div>
+        );
     }
 
     if (!currentUser) {
@@ -290,7 +327,7 @@ const App: React.FC = () => {
                     currentUserId={selectedUserId} 
                     onSelectUser={(userId) => {
                         setSelectedUserId(userId);
-                        setIsSidebarOpen(false); // Close sidebar on selection in mobile
+                        setIsSidebarOpen(false);
                     }} 
                     onAddNewUser={() => {
                         setIsUserAddDialogOpen(true);
